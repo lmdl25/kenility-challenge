@@ -1,0 +1,77 @@
+x-docker-compose-version: '3.1'
+services:
+  api:
+    build: ./
+    env_file: ./.env
+    working_dir: /usr/app
+    ports:
+      - $NODE_LOCAL_PORT:$NODE_DOCKER_PORT
+    restart: always
+    depends_on:
+      - mongo
+      - minio
+    networks:
+      - challenge-network
+
+  mongo:
+    image: mongo:6
+    container_name: mongo-challenge
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: $MONGO_ROOT_USER
+      MONGO_INITDB_ROOT_PASSWORD: $MONGO_ROOT_PASSWORD
+    networks:
+      - challenge-network
+    volumes:
+      - mongo-data:/data/db
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio-challenge
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      MINIO_PORT: 9000
+      MINIO_DEFAULT_BUCKETS: ${MINIO_BUCKET}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    ports:
+      - "9000:9000" # API Port
+      - "9001:9001" # Console Port
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - challenge-network
+    healthcheck: 
+        test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+        interval: 30s
+        timeout: 10s
+        retries: 3
+
+  createbuckets:
+    image: minio/mc
+    networks: 
+      - challenge-network
+    depends_on:
+      - minio 
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for MinIO to be healthy...';
+      echo 'Setting up MinIO alias and bucket...';
+      /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY}; 
+      /usr/bin/mc mb myminio/product-images;
+      /usr/bin/mc anonymous set public myminio/product-images;
+      echo 'MinIO setup complete.';
+      exit 0;
+      "
+
+networks:
+  challenge-network:
+    driver: bridge
+
+volumes:
+  mongo-data:
+    driver: local
+  minio_data:
